@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 GPT_MODEL = os.getenv("CHATGPT_MODEL", "gpt-4.1-mini")
+DROPBOX_SHARED_FOLDER_ID = os.getenv("DROPBOX_SHARED_FOLDER_ID")
+DROPBOX_SHARED_FOLDER_NAME = os.getenv("DROPBOX_SHARED_FOLDER_NAME", "입찰 2025")
 
 # 디버그 모드 - 콘솔에 자세한 정보 출력
 DEBUG = False
@@ -49,10 +51,157 @@ def extract_text_from_pdf(path: str) -> str:
         logger.error(f"PDF 파일 텍스트 추출 오류: {e}")
         return f"[Error extracting text: {str(e)}]"
 
+def find_dropbox_folder(start_path):
+    """지정된 경로에서 드롭박스 폴더를 찾아 경로 반환"""
+    # 드롭박스 폴더명 (일반적인 패턴)
+    dropbox_names = ["Dropbox", "드롭박스"]
+    
+    # 현재 디렉토리가 드롭박스인지 확인
+    current_dir = os.path.basename(start_path)
+    if current_dir in dropbox_names:
+        return start_path
+    
+    # 일반적인 드롭박스 설치 경로 확인 (우선 순위 높음)
+    potential_paths = [
+        os.path.join(os.environ.get("USERPROFILE", ""), "Dropbox"),
+        os.path.expanduser("~/Dropbox"),
+        "D:/Dropbox",
+        "C:/Dropbox",
+        os.path.join(os.environ.get("USERPROFILE", ""), "Documents", "Dropbox"),
+        os.path.expanduser("~/Documents/Dropbox"),
+        "D:/Documents/Dropbox",
+        "C:/Documents/Dropbox",
+        "D:/문서/Dropbox",
+        "C:/문서/Dropbox"
+    ]
+    
+    for path in potential_paths:
+        if os.path.exists(path) and os.path.isdir(path):
+            # 입찰 폴더 확인
+            bid_folder = os.path.join(path, "입찰 2025")
+            if os.path.exists(bid_folder) and os.path.isdir(bid_folder):
+                return path
+    
+    # 상위 디렉토리 탐색 (최대 5단계)
+    path = start_path
+    for _ in range(5):
+        parent = os.path.dirname(path)
+        if not parent or parent == path:
+            break
+            
+        parent_name = os.path.basename(parent)
+        if parent_name in dropbox_names:
+            return parent
+            
+        path = parent
+    
+    # 못 찾으면 None 반환
+    return None
+
+def create_dropbox_forms_dir(pdf_path, base_folder_name=None):
+    """
+    PDF 파일이 위치한 경로를 기반으로 적절한 Dropbox 서식 폴더 경로를 생성
+    
+    Args:
+        pdf_path: PDF 파일 경로
+        base_folder_name: 기본 폴더명 (기본값은 환경변수 또는 "입찰 2025")
+        
+    Returns:
+        (성공여부, 드롭박스 서식폴더 경로)
+    """
+    # 환경 변수에서 기본 폴더명 사용 (인자로 지정된 값이 우선)
+    if base_folder_name is None:
+        base_folder_name = DROPBOX_SHARED_FOLDER_NAME
+    
+    # 환경 변수에 ID가 있으면 해당 공유 폴더 사용
+    if DROPBOX_SHARED_FOLDER_ID:
+        logger.info(f"환경 변수에서 공유 폴더 정보 사용: ID={DROPBOX_SHARED_FOLDER_ID}, 이름={base_folder_name}")
+        
+        # PDF 파일명에서 대상 폴더명 추출
+        pdf_name = os.path.basename(pdf_path)
+        folder_name = os.path.splitext(pdf_name)[0]
+        
+        # 임시 폴더 경로 생성 (로컬에서 작업용)
+        temp_dir = tempfile.gettempdir()
+        target_folder = os.path.join(temp_dir, base_folder_name, folder_name)
+        forms_dir = os.path.join(target_folder, "서식")
+        
+        try:
+            os.makedirs(forms_dir, exist_ok=True)
+            logger.info(f"서식 폴더 생성 (환경 변수 기반): {forms_dir}")
+            return True, forms_dir
+        except Exception as e:
+            logger.error(f"서식 폴더 생성 실패: {e}")
+            return False, None
+    
+    # 이하 기존 코드 (환경 변수가 없을 경우)
+    # PDF 경로의 디렉토리
+    pdf_dir = os.path.dirname(pdf_path)
+    
+    # 먼저 드롭박스 루트 폴더 찾기
+    dropbox_folder = find_dropbox_folder(pdf_dir)
+    if not dropbox_folder:
+        logger.warning(f"드롭박스 폴더를 찾을 수 없습니다: {pdf_dir}")
+        return False, None
+    
+    # PDF 파일이 입찰 폴더 내에 있는지 확인
+    bid_folder = os.path.join(dropbox_folder, base_folder_name)
+    if not os.path.exists(bid_folder):
+        logger.warning(f"입찰 폴더가 없습니다: {bid_folder}")
+        try:
+            os.makedirs(bid_folder, exist_ok=True)
+            logger.info(f"입찰 폴더 생성: {bid_folder}")
+        except Exception as e:
+            logger.error(f"입찰 폴더 생성 실패: {e}")
+            return False, None
+    
+    # PDF 경로에서 드롭박스 루트 이후의 상대 경로 찾기
+    if pdf_dir.startswith(dropbox_folder):
+        rel_path = os.path.relpath(pdf_dir, dropbox_folder)
+        parts = rel_path.split(os.sep)
+        
+        # 첫 번째 부분이 base_folder_name과 같은지 확인
+        if parts and parts[0] == base_folder_name:
+            # 이미 입찰 폴더 아래에 있는 경우
+            target_folder = os.path.join(dropbox_folder, rel_path)
+        else:
+            # 드롭박스 내부이지만 입찰 폴더 외부인 경우
+            # 마지막 디렉토리 이름을 사용
+            if len(parts) > 0:
+                last_dir = parts[-1]
+                if last_dir:
+                    target_folder = os.path.join(bid_folder, last_dir)
+                else:
+                    # 최후의 방어 로직: PDF 파일명을 폴더명으로 사용
+                    pdf_name = os.path.basename(pdf_path)
+                    folder_name = os.path.splitext(pdf_name)[0]
+                    target_folder = os.path.join(bid_folder, folder_name)
+            else:
+                # 단순한 경우 드롭박스 바로 아래
+                pdf_name = os.path.basename(pdf_path)
+                folder_name = os.path.splitext(pdf_name)[0]
+                target_folder = os.path.join(bid_folder, folder_name)
+    else:
+        # 드롭박스 외부인 경우: PDF 파일명을 폴더명으로 사용
+        pdf_name = os.path.basename(pdf_path)
+        folder_name = os.path.splitext(pdf_name)[0]
+        target_folder = os.path.join(bid_folder, folder_name)
+    
+    # 최종 서식 폴더 생성
+    forms_dir = os.path.join(target_folder, "서식")
+    try:
+        os.makedirs(forms_dir, exist_ok=True)
+        logger.info(f"서식 폴더 생성: {forms_dir}")
+        return True, forms_dir
+    except Exception as e:
+        logger.error(f"서식 폴더 생성 실패: {e}")
+        return False, None
+
 def analyze_form_templates(
     pdf_paths: List[str], 
     progress_callback: Optional[Callable[[int], None]] = None,
-    log_callback: Optional[Callable[[str], None]] = None
+    log_callback: Optional[Callable[[str], None]] = None,
+    folder_name: Optional[str] = None  # 명시적 폴더명 인자 추가
 ) -> Dict[str, Any]:
     """
     PDF 파일 목록에서 서식 페이지를 찾아 분석하는 함수
@@ -61,6 +210,7 @@ def analyze_form_templates(
         pdf_paths: PDF 파일 경로 목록
         progress_callback: 진행률 콜백 함수 (0-100)
         log_callback: 로그 메시지 콜백 함수
+        folder_name: 명시적 폴더명 지정
         
     Returns:
         분석 결과 딕셔너리 (doc, forms 키를 포함)
@@ -74,24 +224,35 @@ def analyze_form_templates(
     # OpenAI API 설정
     openai.api_key = CHATGPT_API_KEY
     
-    # 임시 폴더 생성 (서식 PDF 저장용)
+    # 임시 폴더 생성 (중간 처리용)
     output_dir = tempfile.mkdtemp()
-    log_msg = f"임시 출력 폴더 생성: {output_dir}"
+    log_msg = f"임시 처리 폴더 생성: {output_dir}"
     logger.info(log_msg)
     if log_callback:
         log_callback(log_msg)
     
-    # 원본 PDF가 있는 폴더 확인 (첫 번째 파일 기준)
-    original_pdf_dir = None
-    if pdf_paths and len(pdf_paths) > 0:
-        original_pdf_dir = os.path.dirname(pdf_paths[0])
-        # 모든 PDF가 같은 폴더에 있는지 확인
-        same_dir = all(os.path.dirname(p) == original_pdf_dir for p in pdf_paths)
-        if not same_dir:
-            log_msg = "분석 대상 PDF 파일들이 서로 다른 폴더에 위치해 있습니다."
-            logger.warning(log_msg)
+    # 드롭박스 폴더 찾기 (첫 번째 PDF 파일 기준) - 수정 필요
+    forms_dir = None
+    dropbox_target_folder = None
+    if pdf_paths:
+        # 폴더명이 지정되었으면 해당 폴더와 관련된 처리
+        if folder_name and DROPBOX_SHARED_FOLDER_NAME:
+            dropbox_target_folder = f"{DROPBOX_SHARED_FOLDER_NAME}/{folder_name}"
+            if log_callback:
+                log_callback(f"서식 저장 폴더: {dropbox_target_folder}/서식")
+        
+        # 기존 방식대로 처리
+        success, dropbox_forms_dir = create_dropbox_forms_dir(pdf_paths[0])
+        if success:
+            forms_dir = dropbox_forms_dir
+            log_msg = f"드롭박스 서식 폴더 생성: {forms_dir}"
+            logger.info(log_msg)
             if log_callback:
                 log_callback(log_msg)
+    
+    # 임시 서식 폴더 생성 (백업용)
+    temp_forms_dir = os.path.join(output_dir, "서식")
+    os.makedirs(temp_forms_dir, exist_ok=True)
     
     try:
         # 분석된 PDF 파일 정보 기록
@@ -159,15 +320,13 @@ def analyze_form_templates(
         logger.info(log_msg)
         if log_callback:
             log_callback(log_msg)
-            
+        
         response = openai.ChatCompletion.create(
             model=GPT_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
-            ],
-            temperature=0.1,
-            max_tokens=1000
+            ]
         )
         
         # 진행률 업데이트 (API 호출 완료: 60%)
@@ -219,58 +378,20 @@ def analyze_form_templates(
                     # 분석한 파일 목록 추가
                     result["analyzed_files"] = analyzed_files
                 
-                # 원본 PDF 폴더에 서식 폴더 생성
-                if original_pdf_dir and result.get("forms"):
-                    # 드롭박스 경로 찾기 시도 - 원본 PDF 경로 상위 폴더 탐색
-                    dropbox_path = find_dropbox_folder(original_pdf_dir)
-                    
-                    # 최종 저장 경로 설정
-                    save_dir = original_pdf_dir
-                    if dropbox_path:
-                        # 드롭박스 폴더를 찾았다면 해당 경로 사용
-                        log_msg = f"드롭박스 폴더 발견: {dropbox_path}"
-                        logger.info(log_msg)
-                        if log_callback:
-                            log_callback(log_msg)
-                        
-                        # 원본 경로에서 상대 경로 추출 (드롭박스 폴더 이후 부분)
-                        relative_path = os.path.relpath(original_pdf_dir, dropbox_path)
-                        if relative_path == ".":
-                            relative_path = ""
-                        
-                        # 드롭박스 루트 폴더의 "입찰 2025" 확인
-                        bid_folder = os.path.join(dropbox_path, "입찰 2025")
-                        if os.path.exists(bid_folder) and os.path.isdir(bid_folder):
-                            # 원본이 입찰 2025 폴더 내에 있는지 확인
-                            if "입찰 2025" in original_pdf_dir:
-                                # 기존 경로 그대로 사용
-                                save_dir = original_pdf_dir
-                            else:
-                                # 입찰 2025 폴더의 하위 폴더로 저장
-                                save_dir = bid_folder
-                                for part in relative_path.split(os.sep):
-                                    if part and part != "입찰 2025":
-                                        save_dir = os.path.join(save_dir, part)
-                        else:
-                            # 입찰 2025 폴더가 없으면 원본 경로에 저장
-                            save_dir = original_pdf_dir
-                    
-                    # 원본 PDF가 있는 폴더에 "서식" 하위 폴더 생성
-                    forms_dir = os.path.join(save_dir, "서식")
-                    os.makedirs(forms_dir, exist_ok=True)
-                    
-                    log_msg = f"서식 폴더 생성: {forms_dir}"
-                    logger.info(log_msg)
-                    if log_callback:
-                        log_callback(log_msg)
-                    
-                    # 임시 폴더에도 "서식" 폴더 생성 (함수 내 처리용)
-                    forms_output_dir = os.path.join(output_dir, "서식")
-                    os.makedirs(forms_output_dir, exist_ok=True)
-                    
+                # 서식 PDF 파일 생성 시작 부분에 추가 (result["forms"] 처리 전)
+                if result.get("forms"):
                     # 진행률 업데이트 (PDF 생성 시작: 70%)
                     if progress_callback:
                         progress_callback(70)
+                    
+                    # Dropbox 경로 설정
+                    if dropbox_target_folder:
+                        dropbox_forms_path = f"{dropbox_target_folder}/서식"
+                    else:
+                        # 첫 번째 PDF 파일명에서 폴더명 추출
+                        pdf_name = os.path.basename(pdf_paths[0]) if pdf_paths else ""
+                        temp_folder_name = os.path.splitext(pdf_name)[0]
+                        dropbox_forms_path = f"{DROPBOX_SHARED_FOLDER_NAME}/{temp_folder_name}/서식"
                     
                     # 각 서식별 PDF 파일 생성
                     successful_forms = []
@@ -283,10 +404,16 @@ def analyze_form_templates(
                         filename = form.get("filename", f"{page}p_서식.pdf")
                         filename = re.sub(r'[\\/*?:"<>|]', "", filename)
                         
-                        # 임시 폴더 내 출력 경로
-                        temp_output_path = os.path.join(forms_output_dir, filename)
-                        # 최종 저장 경로 (드롭박스 폴더 내 서식 폴더)
-                        final_output_path = os.path.join(forms_dir, filename)
+                        # 임시 경로와 최종 경로 설정 - 항상 드롭박스 폴더 우선 사용
+                        if forms_dir:
+                            # 드롭박스 폴더가 있으면 최종 파일은 드롭박스에 저장
+                            final_output_path = os.path.join(forms_dir, filename)
+                            # 임시 파일은 더 이상 필요 없음 (직접 최종 경로에 저장)
+                            temp_output_path = final_output_path
+                        else:
+                            # 드롭박스 폴더가 없으면 임시 폴더에 저장
+                            temp_output_path = os.path.join(temp_forms_dir, filename)
+                            final_output_path = temp_output_path
                         
                         log_msg = f"서식 파일 생성 중: {filename}"
                         logger.info(log_msg)
@@ -315,11 +442,7 @@ def analyze_form_templates(
                                     writer = PdfWriter()
                                     writer.add_page(reader.pages[page_idx])
                                     
-                                    # 임시 파일로 저장
-                                    with open(temp_output_path, "wb") as out_file:
-                                        writer.write(out_file)
-                                    
-                                    # 최종 위치에도 저장
+                                    # 파일로 저장 (최종 경로에 직접 저장)
                                     with open(final_output_path, "wb") as out_file:
                                         writer.write(out_file)
                                     
@@ -330,8 +453,9 @@ def analyze_form_templates(
                                     
                                     # 원본 파일 경로 추가
                                     form["source_pdf"] = os.path.basename(pdf_path)
-                                    form["output_path"] = temp_output_path  # 임시 경로 기록
-                                    form["final_path"] = final_output_path  # 최종 경로 기록
+                                    form["output_path"] = final_output_path  # 이제 출력 경로는 최종 경로와 동일
+                                    form["final_path"] = final_output_path  # 최종 경로도 설정
+                                    form["dropbox_path"] = f"{dropbox_forms_path}/{filename}"  # Dropbox 경로 추가
                                     successful_forms.append(form)
                                     break
                             except Exception as e:
@@ -348,9 +472,13 @@ def analyze_form_templates(
                     result["forms"] = successful_forms
                     result["forms_generated"] = len(successful_forms)
                     
-                    # 분석 결과 JSON 파일도 원본 폴더에 저장
-                    # 서식분석결과.json 파일을 서식 폴더에 저장
-                    result_json_path = os.path.join(forms_dir, "서식분석결과.json")
+                    # 분석 결과 JSON 파일 저장 (항상 서식 파일과 같은 위치에 저장)
+                    result_json_path = ""
+                    if forms_dir:
+                        result_json_path = os.path.join(forms_dir, "서식분석결과.json")
+                    else:
+                        result_json_path = os.path.join(temp_forms_dir, "서식분석결과.json")
+                    
                     try:
                         with open(result_json_path, "w", encoding="utf-8") as f:
                             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -364,10 +492,58 @@ def analyze_form_templates(
                         if log_callback:
                             log_callback(error_msg)
                 
+                # 결과 반환 전에 Dropbox 업로드 코드 추가
+                # 분석 완료 후 서식 파일 및 결과 JSON을 Dropbox에 업로드
+                try:
+                    if result.get("forms"):
+                        log_msg = f"Dropbox 업로드 시작: {dropbox_forms_path}"
+                        logger.info(log_msg)
+                        if log_callback:
+                            log_callback(log_msg)
+                            
+                        # 서식 파일 업로드
+                        for form in result["forms"]:
+                            output_path = form.get("output_path")
+                            if output_path and os.path.exists(output_path):
+                                dropbox_path = form.get("dropbox_path")
+                                if dropbox_path:
+                                    try:
+                                        upload_file(dropbox_path, output_path)
+                                        log_msg = f"Dropbox 업로드 완료: {os.path.basename(output_path)}"
+                                        logger.info(log_msg)
+                                        if log_callback:
+                                            log_callback(log_msg)
+                                    except Exception as e:
+                                        log_msg = f"Dropbox 업로드 실패: {e}"
+                                        logger.error(log_msg)
+                                        if log_callback:
+                                            log_callback(log_msg)
+                        
+                        # 결과 JSON 업로드
+                        json_path = f"{dropbox_forms_path}/서식분석결과.json"
+                        try:
+                            upload_json(json_path, result)
+                            log_msg = f"결과 JSON Dropbox 업로드 완료: {json_path}"
+                            logger.info(log_msg)
+                            if log_callback:
+                                log_callback(log_msg)
+                        except Exception as e:
+                            log_msg = f"결과 JSON 업로드 실패: {e}"
+                            logger.error(log_msg)
+                            if log_callback:
+                                log_callback(log_msg)
+                except Exception as e:
+                    log_msg = f"Dropbox 업로드 중 오류: {e}"
+                    logger.error(log_msg)
+                    if log_callback:
+                        log_callback(log_msg)
+                
                 # 진행률 업데이트 (완료: 95%)
                 if progress_callback:
                     progress_callback(95)
                 
+                # 최종 저장 위치 기록
+                result["forms_dir"] = forms_dir or temp_forms_dir
                 return result
         except Exception as e:
             error_msg = f"JSON 파싱 오류: {e}"
@@ -443,98 +619,74 @@ def analyze_form_templates(
                     key=lambda x: x.get("page", 999)
                 ) + [f for f in unique_forms if "page" not in f]
                 
-                # 원본 PDF 폴더에 서식 생성 시도
-                if original_pdf_dir and result["forms"]:
-                    # 드롭박스 경로 찾기 시도
-                    dropbox_path = find_dropbox_folder(original_pdf_dir)
-                    
-                    # 최종 저장 경로 설정
-                    save_dir = original_pdf_dir
-                    if dropbox_path:
-                        # 원본 경로에서 상대 경로 추출 (드롭박스 폴더 이후 부분)
-                        relative_path = os.path.relpath(original_pdf_dir, dropbox_path)
-                        if relative_path == ".":
-                            relative_path = ""
+                # 백업 처리로 서식 폴더에 저장
+                if forms_dir:
+                    backup_forms_dir = forms_dir
+                else:
+                    backup_forms_dir = temp_forms_dir
+                
+                log_msg = f"백업 처리: 서식 폴더 사용 {backup_forms_dir}"
+                logger.info(log_msg)
+                if log_callback:
+                    log_callback(log_msg)
+                
+                # 페이지 번호가 있는 서식만 처리
+                for form in [f for f in result["forms"] if "page" in f]:
+                    page = form.get("page")
+                    if page is None:
+                        continue
                         
-                        # 드롭박스 루트 폴더의 "입찰 2025" 확인
-                        bid_folder = os.path.join(dropbox_path, "입찰 2025")
-                        if os.path.exists(bid_folder) and os.path.isdir(bid_folder):
-                            # 원본이 입찰 2025 폴더 내에 있는지 확인
-                            if "입찰 2025" in original_pdf_dir:
-                                # 기존 경로 그대로 사용
-                                save_dir = original_pdf_dir
-                            else:
-                                # 입찰 2025 폴더의 하위 폴더로 저장
-                                save_dir = bid_folder
-                                for part in relative_path.split(os.sep):
-                                    if part and part != "입찰 2025":
-                                        save_dir = os.path.join(save_dir, part)
-                        else:
-                            # 입찰 2025 폴더가 없으면 원본 경로에 저장
-                            save_dir = original_pdf_dir
+                    # 파일명 생성
+                    filename = form.get("filename", f"{page}p_서식.pdf")
+                    filename = re.sub(r'[\\/*?:"<>|]', "", filename)
+                    final_output_path = os.path.join(backup_forms_dir, filename)
                     
-                    forms_dir = os.path.join(save_dir, "서식")
-                    os.makedirs(forms_dir, exist_ok=True)
-                    
-                    log_msg = f"백업 처리: 서식 폴더 생성 {forms_dir}"
+                    # 첫 번째 PDF에서 해당 페이지 추출 시도
+                    if pdf_paths:
+                        try:
+                            reader = PdfReader(pdf_paths[0])
+                            if page <= len(reader.pages):
+                                # 0-기반 인덱스로 변환
+                                page_idx = page - 1
+                                
+                                # 단일 페이지 추출
+                                writer = PdfWriter()
+                                writer.add_page(reader.pages[page_idx])
+                                
+                                # 최종 위치에 저장
+                                with open(final_output_path, "wb") as out_file:
+                                    writer.write(out_file)
+                                
+                                log_msg = f"백업 처리: 서식 파일 저장 {final_output_path}"
+                                logger.info(log_msg)
+                                if log_callback:
+                                    log_callback(log_msg)
+                                    
+                                # 경로 정보 추가    
+                                form["final_path"] = final_output_path
+                        except Exception as e:
+                            error_msg = f"백업 처리 서식 추출 오류 (페이지 {page}): {e}"
+                            logger.error(error_msg)
+                            if log_callback:
+                                log_callback(error_msg)
+                
+                # 분석 결과 JSON 파일도 저장
+                result_json_path = os.path.join(backup_forms_dir, "서식분석결과.json")
+                try:
+                    with open(result_json_path, "w", encoding="utf-8") as f:
+                        json.dump(result, f, ensure_ascii=False, indent=2)
+                    log_msg = f"백업 처리: 분석 결과 JSON 저장 완료 {result_json_path}"
                     logger.info(log_msg)
                     if log_callback:
                         log_callback(log_msg)
-                    
-                    # 페이지 번호가 있는 서식만 처리
-                    for form in [f for f in result["forms"] if "page" in f]:
-                        page = form.get("page")
-                        if page is None:
-                            continue
-                            
-                        # 파일명 생성
-                        filename = form.get("filename", f"{page}p_서식.pdf")
-                        filename = re.sub(r'[\\/*?:"<>|]', "", filename)
-                        final_output_path = os.path.join(forms_dir, filename)
-                        
-                        # 첫 번째 PDF에서 해당 페이지 추출 시도
-                        if pdf_paths:
-                            try:
-                                reader = PdfReader(pdf_paths[0])
-                                if page <= len(reader.pages):
-                                    # 0-기반 인덱스로 변환
-                                    page_idx = page - 1
-                                    
-                                    # 단일 페이지 추출
-                                    writer = PdfWriter()
-                                    writer.add_page(reader.pages[page_idx])
-                                    
-                                    # 최종 위치에 저장
-                                    with open(final_output_path, "wb") as out_file:
-                                        writer.write(out_file)
-                                    
-                                    log_msg = f"백업 처리: 서식 파일 저장 {final_output_path}"
-                                    logger.info(log_msg)
-                                    if log_callback:
-                                        log_callback(log_msg)
-                                        
-                                    # 경로 정보 추가    
-                                    form["final_path"] = final_output_path
-                            except Exception as e:
-                                error_msg = f"백업 처리 서식 추출 오류 (페이지 {page}): {e}"
-                                logger.error(error_msg)
-                                if log_callback:
-                                    log_callback(error_msg)
-                    
-                    # 분석 결과 JSON 파일도 저장
-                    result_json_path = os.path.join(forms_dir, "서식분석결과.json")
-                    try:
-                        with open(result_json_path, "w", encoding="utf-8") as f:
-                            json.dump(result, f, ensure_ascii=False, indent=2)
-                        log_msg = f"백업 처리: 분석 결과 JSON 저장 완료 {result_json_path}"
-                        logger.info(log_msg)
-                        if log_callback:
-                            log_callback(log_msg)
-                    except Exception as e:
-                        error_msg = f"백업 처리 JSON 저장 오류: {e}"
-                        logger.error(error_msg)
-                        if log_callback:
-                            log_callback(error_msg)
+                except Exception as e:
+                    error_msg = f"백업 처리 JSON 저장 오류: {e}"
+                    logger.error(error_msg)
+                    if log_callback:
+                        log_callback(error_msg)
+            
+            # 최종 저장 위치 기록
+            result["forms_dir"] = forms_dir or temp_forms_dir
             
             # 진행률 업데이트 (완료: 100%)
             if progress_callback:
@@ -550,7 +702,8 @@ def analyze_form_templates(
                 "doc": "", 
                 "forms": [], 
                 "error": str(e),
-                "analyzed_files": analyzed_files
+                "analyzed_files": analyzed_files,
+                "forms_dir": forms_dir or temp_forms_dir
             }
     
     except Exception as e:
@@ -562,61 +715,13 @@ def analyze_form_templates(
             "doc": "", 
             "forms": [], 
             "error": str(e),
-            "analyzed_files": [os.path.basename(p) for p in pdf_paths]
+            "analyzed_files": [os.path.basename(p) for p in pdf_paths],
+            "forms_dir": forms_dir or temp_forms_dir
         }
     finally:
-        # 임시 폴더 삭제 - 이미 최종 위치에 파일을 저장했으므로 임시 폴더는 삭제
-        try:
-            shutil.rmtree(output_dir)
-        except:
-            pass
-
-def find_dropbox_folder(start_path):
-    """지정된 경로에서 드롭박스 폴더를 찾아 경로 반환"""
-    # 드롭박스 폴더명 (일반적인 패턴)
-    dropbox_names = ["Dropbox", "드롭박스"]
-    
-    # 현재 디렉토리가 드롭박스인지 확인
-    current_dir = os.path.basename(start_path)
-    if current_dir in dropbox_names:
-        return start_path
-    
-    # 상위 디렉토리 탐색 (최대 5단계)
-    path = start_path
-    for _ in range(5):
-        parent = os.path.dirname(path)
-        if not parent or parent == path:
-            break
-            
-        parent_name = os.path.basename(parent)
-        if parent_name in dropbox_names:
-            return parent
-            
-        path = parent
-    
-    # 일반적인 드롭박스 설치 경로 확인
-    potential_paths = [
-        os.path.expanduser("~/Dropbox"),
-        os.path.expanduser("~/Documents/Dropbox"),
-        os.path.join(os.environ.get("USERPROFILE", ""), "Dropbox"),
-        os.path.join(os.environ.get("USERPROFILE", ""), "Documents", "Dropbox"),
-        "D:/Dropbox",
-        "C:/Dropbox",
-        "D:/문서/Dropbox",
-        "C:/문서/Dropbox",
-        "D:/Documents/Dropbox",
-        "C:/Documents/Dropbox"
-    ]
-    
-    for path in potential_paths:
-        if os.path.exists(path) and os.path.isdir(path):
-            # 입찰 폴더 확인
-            bid_folder = os.path.join(path, "입찰 2025")
-            if os.path.exists(bid_folder) and os.path.isdir(bid_folder):
-                return path
-    
-    # 못 찾으면 None 반환
-    return None
+        # 임시 폴더는 삭제하지 않음 - 임시 폴더가 실제 저장 위치일 수 있음
+        # 임시 폴더 경로는 결과에 포함되어 있으므로, 호출자가 적절히 처리해야 함
+        pass
 
 def save_form_templates(
     result: Dict[str, Any], 
@@ -674,4 +779,4 @@ if __name__ == "__main__":
         result = analyze_form_templates([test_pdf])
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print(f"테스트 PDF 파일이 없습니다: {test_pdf}") 
+        print(f"테스트 PDF 파일이 없습니다: {test_pdf}")

@@ -63,3 +63,40 @@ def upload_json(remote_path: str, data: dict) -> None:
     p = _normalize_path(remote_path)
     content = json.dumps(data, ensure_ascii=False, indent=2)
     dbx.files_upload(content.encode("utf-8"), p, mode=dropbox.files.WriteMode.overwrite)
+
+def upload_file(remote_path: str, local_path: str) -> None:
+    """로컬 파일을 Dropbox에 업로드합니다."""
+    dbx = get_dbx()
+    p = _normalize_path(remote_path)
+    
+    # 디렉토리 경로 자동 생성
+    folder_path = os.path.dirname(p)
+    try:
+        # 폴더 존재 여부 확인
+        try:
+            dbx.files_get_metadata(folder_path)
+            print(f"폴더가 이미 존재합니다: {folder_path}")
+        except Exception:
+            # 폴더가 없으면 생성
+            print(f"폴더 생성 시도: {folder_path}")
+            try:
+                result = dbx.files_create_folder_v2(folder_path)
+                print(f"폴더 생성 완료: {result.metadata.path_display}")
+            except dropbox.exceptions.ApiError as e:
+                if isinstance(e.error, dropbox.files.CreateFolderError) and e.error.is_path() and e.error.get_path().is_conflict():
+                    print(f"폴더가 이미 존재합니다 (충돌): {folder_path}")
+                else:
+                    print(f"폴더 생성 중 API 오류: {e}")
+    except Exception as e:
+        print(f"폴더 확인/생성 중 오류 (무시됨): {e}")
+    
+    # 파일 업로드
+    print(f"파일 업로드 시작: {p}")
+    try:
+        with open(local_path, "rb") as f:
+            result = dbx.files_upload(f.read(), p, mode=dropbox.files.WriteMode.overwrite)
+        print(f"파일 업로드 완료: {result.path_display}, 크기: {result.size} 바이트")
+        return result.path_display
+    except Exception as e:
+        print(f"파일 업로드 오류: {e}")
+        raise
