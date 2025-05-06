@@ -11,6 +11,7 @@ from dropbox_client import list_folder, download_file, upload_file, upload_json
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader, PdfWriter
 import re
+from settings import settings
 
 class ManualTocGuideDialog(QDialog):
     def __init__(self, parent=None):
@@ -20,7 +21,11 @@ class ManualTocGuideDialog(QDialog):
         
         # .env 파일 로드
         load_dotenv()
-        self.local_base_path = os.getenv('LOCAL_BID_FOLDER', 'C:/Users/ustudiogram/U-Studio Dropbox/양승철/입찰 2025')
+        self.local_base_path = os.getenv('LOCAL_BID_FOLDER')
+        if not self.local_base_path:
+            QMessageBox.warning(self, "설정 오류", ".env 파일에 LOCAL_BID_FOLDER가 설정되지 않았습니다.")
+            self.reject()
+            return
         
         # 부모 창에서 폴더 정보 가져오기
         self.folder = getattr(parent, 'folder', None)

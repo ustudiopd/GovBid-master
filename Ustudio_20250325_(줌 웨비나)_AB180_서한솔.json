@@ -1,0 +1,40 @@
+{
+  "meta": {},
+  "items": [
+    {
+      "category": "줌 웨비나 프로덕션",
+      "description": "스튜디오 렌탈(유스튜디오) 장비 일체",
+      "unit_price": 1000000.0,
+      "quantity": 1.0,
+      "unit_count": 1.0,
+      "amount": 1000000.0
+    },
+    {
+      "category": "줌 웨비나 프로덕션",
+      "description": "라이브 스트리밍 콘솔 및 인력 비용",
+      "unit_price": 800000.0,
+      "quantity": 1.0,
+      "unit_count": 1.0,
+      "amount": 800000.0
+    },
+    {
+      "category": "줌 웨비나 프로덕션",
+      "description": "종료후 기본 컷 편집 (무료)",
+      "unit_price": 0,
+      "quantity": 1.0,
+      "unit_count": 1.0,
+      "amount": null
+    },
+    {
+      "category": "줌 웨비나 프로덕션",
+      "description": "3회 이상 송출 할인",
+      "unit_price": -200000.0,
+      "quantity": 1.0,
+      "unit_count": 1.0,
+      "amount": -200000.0
+    }
+  ],
+  "discounts": [],
+  "summary": {},
+  "comments": ""
+}

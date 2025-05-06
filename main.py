@@ -15,6 +15,7 @@ from typing import List, Dict, Any
 import glob
 import json
 from openai import OpenAI
+from settings import settings
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -171,40 +172,16 @@ class MainWindow(QMainWindow):
         detail_dialog.exec_()
 
     def find_dropbox_folder(self):
-        """로컬 Dropbox 폴더 위치 탐색"""
-        # 일반적인 Dropbox 설치 경로
-        potential_paths = [
-            os.path.expanduser("~/Dropbox"),
-            os.path.expanduser("~/Documents/Dropbox"),
-            os.path.join(os.environ.get("USERPROFILE", ""), "Dropbox"),
-            os.path.join(os.environ.get("USERPROFILE", ""), "Documents", "Dropbox"),
-            "D:/Dropbox",
-            "C:/Dropbox",
-            "D:/문서/Dropbox",
-            "C:/문서/Dropbox",
-            "D:/Documents/Dropbox",
-            "C:/Documents/Dropbox"
+        """Dropbox 폴더 찾기"""
+        possible_paths = [
+            os.path.join(os.path.expanduser('~'), 'Dropbox'),
+            os.path.join(os.path.expanduser('~'), 'Documents', 'Dropbox'),
+            os.path.join(os.path.expanduser('~'), '문서', 'Dropbox')
         ]
         
-        # 특정 경로 확인
-        for path in potential_paths:
-            if os.path.exists(path) and os.path.isdir(path):
-                print(f"Dropbox 폴더 발견: {path}")
-                
-                # 입찰 폴더 확인
-                bid_folder = os.path.join(path, "입찰 2025")
-                if os.path.exists(bid_folder):
-                    return path
-        
-        # 폴더가 없으면 사용자에게 물어보기
-        folder = QFileDialog.getExistingDirectory(
-            self, "Dropbox 폴더 선택", "", 
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
-        )
-        
-        if folder and os.path.isdir(folder):
-            return folder
-            
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
         return None
 
     def toggle_fullscreen(self):

@@ -11,6 +11,7 @@ import shutil
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader, PdfWriter
 from openai import OpenAI
+from settings import settings
 
 # Dropbox 클라이언트 임포트
 from dropbox_client import upload_file, upload_json
@@ -51,51 +52,17 @@ def extract_text_from_pdf(path: str) -> str:
         logger.error(f"PDF 파일 텍스트 추출 오류: {e}")
         return f"[Error extracting text: {str(e)}]"
 
-def find_dropbox_folder(start_path):
-    """지정된 경로에서 드롭박스 폴더를 찾아 경로 반환"""
-    # 드롭박스 폴더명 (일반적인 패턴)
-    dropbox_names = ["Dropbox", "드롭박스"]
-    
-    # 현재 디렉토리가 드롭박스인지 확인
-    current_dir = os.path.basename(start_path)
-    if current_dir in dropbox_names:
-        return start_path
-    
-    # 일반적인 드롭박스 설치 경로 확인 (우선 순위 높음)
-    potential_paths = [
-        os.path.join(os.environ.get("USERPROFILE", ""), "Dropbox"),
-        os.path.expanduser("~/Dropbox"),
-        "D:/Dropbox",
-        "C:/Dropbox",
-        os.path.join(os.environ.get("USERPROFILE", ""), "Documents", "Dropbox"),
-        os.path.expanduser("~/Documents/Dropbox"),
-        "D:/Documents/Dropbox",
-        "C:/Documents/Dropbox",
-        "D:/문서/Dropbox",
-        "C:/문서/Dropbox"
+def find_dropbox_folder():
+    """Dropbox 폴더 찾기"""
+    possible_paths = [
+        os.path.join(os.path.expanduser('~'), 'Dropbox'),
+        os.path.join(os.path.expanduser('~'), 'Documents', 'Dropbox'),
+        os.path.join(os.path.expanduser('~'), '문서', 'Dropbox')
     ]
     
-    for path in potential_paths:
-        if os.path.exists(path) and os.path.isdir(path):
-            # 입찰 폴더 확인
-            bid_folder = os.path.join(path, "입찰 2025")
-            if os.path.exists(bid_folder) and os.path.isdir(bid_folder):
-                return path
-    
-    # 상위 디렉토리 탐색 (최대 5단계)
-    path = start_path
-    for _ in range(5):
-        parent = os.path.dirname(path)
-        if not parent or parent == path:
-            break
-            
-        parent_name = os.path.basename(parent)
-        if parent_name in dropbox_names:
-            return parent
-            
-        path = parent
-    
-    # 못 찾으면 None 반환
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
     return None
 
 def create_dropbox_forms_dir(pdf_path, base_folder_name=None):
@@ -139,7 +106,7 @@ def create_dropbox_forms_dir(pdf_path, base_folder_name=None):
     pdf_dir = os.path.dirname(pdf_path)
     
     # 먼저 드롭박스 루트 폴더 찾기
-    dropbox_folder = find_dropbox_folder(pdf_dir)
+    dropbox_folder = find_dropbox_folder()
     if not dropbox_folder:
         logger.warning(f"드롭박스 폴더를 찾을 수 없습니다: {pdf_dir}")
         return False, None

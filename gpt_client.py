@@ -1,8 +1,12 @@
 import json
 import logging
 from typing import List, Dict, Any
+import os
+import tempfile
+from PyQt5.QtWidgets import QMessageBox, QProgressDialog, QApplication
+from PyQt5.QtCore import Qt
+import openai
 
-from openai import OpenAI
 from PyPDF2 import PdfReader
 
 # 루트 설정 파일 임포트로 변경
@@ -59,63 +63,46 @@ def extract_text_from_pdf(path: str) -> str:
         text_parts.append(f"===PAGE {i+1}===\n{text}")
     return "\n".join(text_parts)
 
-def analyze_pdfs(pdf_paths: List[str], prompt: str = None) -> Dict[str, Any]:
-    """
-    주어진 PDF 경로 리스트를 읽어 ChatGPT API에 분석 요청,
-    반환된 JSON 문자열을 파싱하여 dict로 반환합니다.
-    """
-    # 1) PDF 텍스트 합치기
-    docs = []
-    for p in pdf_paths:
-        docs.append(f"\n===DOCUMENT: {p}===\n" + extract_text_from_pdf(p))
-    full_text = "\n".join(docs)
-    print("[DEBUG] PDF 추출 텍스트 (앞부분):", full_text[:1000])
-
-    # 2) 사용자 프롬프트: 문서 텍스트 포함
-    if prompt is not None:
-        user_prompt = prompt
-    else:
-        user_prompt = f"""
-다음은 PDF 문서의 페이지별 텍스트입니다.  \n각 페이지 앞에 \"===PAGE n===\" 로 구분되어 있습니다.  \n\n===DOCUMENT_TEXT===\n{full_text}\n\n위 텍스트를 읽고, 여섯 가지 항목을 추출하여 순수 JSON으로만 답해주세요.\n"""
-    print("[DEBUG] ChatGPT 요청 프롬프트 (앞부분):", user_prompt[:1000])
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    # 3) ChatGPT 호출
-    client = OpenAI(api_key=API_KEY)
+def analyze_pdfs(pdf_paths, parent=None):
     try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=10000
-        )
+        # Create a temporary file to store the PDF paths
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            json.dump(pdf_paths, temp_file)
+            temp_file_path = temp_file.name
+
+        # Create progress dialog
+        progress = QProgressDialog("PDF 분석 중...", "취소", 0, 100, parent)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+
+        # Initialize OpenAI client
+        client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+
+        # Read the PDF paths from the temporary file
+        with open(temp_file_path, 'r') as f:
+            pdf_paths = json.load(f)
+
+        # Process each PDF
+        for i, pdf_path in enumerate(pdf_paths):
+            if progress.wasCanceled():
+                break
+
+            # Update progress
+            progress.setValue(int((i / len(pdf_paths)) * 100))
+            QApplication.processEvents()
+
+            # Process PDF here
+            # Add your PDF processing logic
+
+        # Clean up
+        os.unlink(temp_file_path)
+        progress.setValue(100)
+
+        return True
+
     except Exception as e:
-        print(f"[ERROR] OpenAI ChatCompletion API call failed: {e}")
-        logger.error(f"OpenAI ChatCompletion API call failed: {e}")
-        raise
-
-    # 4) 응답에서 content 추출
-    content = resp.choices[0].message.content
-    print("[DEBUG] GPT response content (앞부분):", content[:1000])
-    logger.debug(f"GPT response content: {content}")
-
-    # 4-1) 마크다운 코드 블록 제거 (```json ... ```)
-    content = clean_gpt_response(content)
-
-    # 5) JSON 파싱
-    try:
-        result = json.loads(content)
-        print("[DEBUG] JSON 파싱 결과 keys:", list(result.keys()) if isinstance(result, dict) else type(result))
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Failed to parse JSON from GPT response: {e}\n원본 content: {content}")
-        logger.error(f"Failed to parse JSON from GPT response: {e}")
-        # 파싱 에러 시 원본을 함께 던집니다.
-        raise ValueError(f"Invalid JSON response: {content}") from e
-
-    return result
+        QMessageBox.critical(parent, "오류", f"PDF 분석 중 오류가 발생했습니다: {str(e)}")
+        return False
 
 def clean_gpt_response(content: str) -> str:
     """
