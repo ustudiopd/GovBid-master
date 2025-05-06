@@ -5,10 +5,11 @@ from PyQt5.QtWidgets import QMessageBox, QProgressDialog, QApplication
 from dropbox_client import list_folder, download_file, upload_json
 from gpt_client import analyze_pdfs
 import glob
-import openai
+from openai import OpenAI
 from settings import settings
 
 MODEL = settings.GPT_MODEL  # e.g. "gpt-4.1-mini"
+API_KEY = settings.CHATGPT_API_KEY
 
 class TocGuideGenerator:
     """목차 가이드 생성 클래스"""

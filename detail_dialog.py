@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from dropbox_client import list_folder, download_json, download_file, upload_json, upload_file
 from toc_guide_generator import TocGuideGenerator
+from manual_toc_guide import ManualTocGuideDialog
 
 class DetailDialog(QDialog):
     def __init__(self, parent=None, entry=None, folder=None):
@@ -448,6 +449,8 @@ class DetailDialog(QDialog):
     
     def generate_toc_guide(self):
         """목차 가이드 생성"""
-        if TocGuideGenerator.generate_guide(self.folder, self):
-            # 목차 가이드 생성 성공 시 데이터 다시 로드
+        # 수동 목차 가이드 생성 창 열기
+        dialog = ManualTocGuideDialog(self)
+        if dialog.exec_():
+            # 저장 성공 시 데이터 다시 로드
             self.load_analysis_data() 

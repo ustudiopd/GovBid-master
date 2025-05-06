@@ -1,0 +1,5 @@
+PyQt5
+dropbox
+openai
+python-dotenv
+PyPDF2

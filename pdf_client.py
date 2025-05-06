@@ -10,7 +10,7 @@ import tempfile
 import shutil
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader, PdfWriter
-import openai
+from openai import OpenAI
 
 # Dropbox 클라이언트 임포트
 from dropbox_client import upload_file, upload_json
@@ -221,8 +221,8 @@ def analyze_form_templates(
             log_callback(log_msg)
         raise ValueError(log_msg)
     
-    # OpenAI API 설정
-    openai.api_key = CHATGPT_API_KEY
+    # 최신 openai 방식
+    client = OpenAI(api_key=CHATGPT_API_KEY)
     
     # 임시 폴더 생성 (중간 처리용)
     output_dir = tempfile.mkdtemp()
@@ -321,7 +321,7 @@ def analyze_form_templates(
         if log_callback:
             log_callback(log_msg)
         
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=GPT_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},

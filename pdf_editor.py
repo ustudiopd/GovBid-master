@@ -16,6 +16,7 @@ import shutil
 import re
 import threading
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # PDF2Image 라이브러리 사용 (poppler 대체)
 try:
@@ -575,10 +576,9 @@ Return a JSON array of these document objects. Do **not** include any extra comm
             filename = os.path.basename(self.pdf_path)
             
             # OpenAI API 호출
-            openai.api_key = self.api_key
+            client = OpenAI(api_key=self.api_key)
             self.progress_updated.emit(60)
-            
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": prompt},
@@ -587,7 +587,6 @@ Return a JSON array of these document objects. Do **not** include any extra comm
                 temperature=0.2,
                 max_tokens=1500
             )
-            
             self.progress_updated.emit(90)
             
             # 결과 파싱

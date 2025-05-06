@@ -2,7 +2,7 @@ import json
 import logging
 from typing import List, Dict, Any
 
-import openai
+from openai import OpenAI
 from PyPDF2 import PdfReader
 
 # 루트 설정 파일 임포트로 변경
@@ -11,8 +11,8 @@ from settings import settings
 logger = logging.getLogger(__name__)
 
 # 1) OpenAI API 키 및 모델 설정
-openai.api_key = settings.CHATGPT_API_KEY
 MODEL = settings.GPT_MODEL  # e.g. "gpt-4.1-mini"
+API_KEY = settings.CHATGPT_API_KEY
 
 # 2) 시스템 프롬프트 (분석 포맷 안내)
 SYSTEM_PROMPT = """
@@ -84,8 +84,9 @@ def analyze_pdfs(pdf_paths: List[str], prompt: str = None) -> Dict[str, Any]:
     ]
 
     # 3) ChatGPT 호출
+    client = OpenAI(api_key=API_KEY)
     try:
-        resp = openai.ChatCompletion.create(
+        resp = client.chat.completions.create(
             model=MODEL,
             messages=messages,
             temperature=0.0,

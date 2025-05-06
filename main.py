@@ -13,8 +13,8 @@ from detail_dialog import DetailDialog
 from analyzer import Analyzer
 from typing import List, Dict, Any
 import glob
-import openai
 import json
+from openai import OpenAI
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -280,6 +280,8 @@ Do not hard-code filenames; dynamically discover PDFs with glob. Ensure JSON is 
 """
 
 def extract_toc_and_guidelines():
+    import os
+    from settings import settings
     pdf_files = glob.glob('*.pdf')
     if not pdf_files:
         raise FileNotFoundError("No PDF files found in current directory.")
@@ -290,8 +292,11 @@ def extract_toc_and_guidelines():
         {"role": "user", "content": prompt}
     ]
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4.1-mini",
+    api_key = settings.CHATGPT_API_KEY
+    model = settings.GPT_MODEL
+    client = OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
+        model=model,
         messages=messages,
         temperature=0
     )
@@ -301,11 +306,9 @@ def extract_toc_and_guidelines():
         result = json.loads(content)
     except json.JSONDecodeError:
         raise ValueError(f"Invalid JSON returned: {content}")
-    # Validate expected keys
     for key in ["documents_processed", "source_references", "table_of_contents", "writing_guidelines"]:
         if key not in result:
             raise KeyError(f"Missing expected key in JSON: {key}")
-    # Output formatted JSON
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 if __name__ == "__main__":
